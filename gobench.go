@@ -9,6 +9,7 @@ import (
 	vstproto "github.com/arangodb/go-driver/vst/protocol"
 	"log"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -19,7 +20,7 @@ type Book struct {
 
 var (
 	nrConnections int    = 1
-	endpoint      string = "http://0.0.0.0:8529"
+	endpoint      string = "http://127.0.0.1:8529"
 	testcase      string = "postDocs"
 	nrRequests    int    = 1000
 	parallelism   int    = 1
@@ -60,20 +61,37 @@ func logStats(name string, times []time.Duration) {
 
 func doPostDocs(col driver.Collection) {
 	// Create documents
-	times := make([]time.Duration, 0, nrRequests)
-	for i := 0; i < nrRequests; i++ {
-		startTime := time.Now()
-		book := Book{
-			Title:   "Some small string",
-			NoPages: i,
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(times []time.Duration, nrRequestsPerWorker int) {
+		defer wg.Done()
+		for i := 0; i < nrRequestsPerWorker; i++ {
+			startTime := time.Now()
+			book := Book{
+				Title:   "Some small string",
+				NoPages: i,
+			}
+			_, err := col.CreateDocument(nil, book)
+			if err != nil {
+				log.Fatalf("Failed to create document: %v", err)
+			}
+			endTime := time.Now()
+			times[i] = endTime.Sub(startTime)
 		}
-		_, err := col.CreateDocument(nil, book)
-		if err != nil {
-			log.Fatalf("Failed to create document: %v", err)
-		}
-		endTime := time.Now()
-		times = append(times, endTime.Sub(startTime))
 	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go worker(times[j*nrRequestsPerWorker:(j+1)*nrRequestsPerWorker],
+			nrRequestsPerWorker)
+	}
+
+	wg.Wait()
+	log.Printf("Hallo Welt")
 	logStats("create document ops", times)
 }
 
