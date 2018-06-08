@@ -46,17 +46,17 @@ func logStats(name string, times []time.Duration) {
 	log.Printf("Number of samples: %d", nr)
 	log.Printf("Average: %v", time.Duration(sum/int64(nr)))
 	log.Printf("Median : %v", times[nr/2])
-	log.Printf("90%%   : %v", times[(nr*90)/100])
-	log.Printf("99%%   : %v", times[(nr*99)/100])
-	log.Printf("99.9%% : %v", times[(nr*999)/1000])
+	log.Printf("90%%    : %v", times[(nr*90)/100])
+	log.Printf("99%%    : %v", times[(nr*99)/100])
+	log.Printf("99.9%%  : %v", times[(nr*999)/1000])
 	if nr >= 20 {
 		log.Printf("Smallest: ")
 		for i := 0; i < 10; i++ {
-			log.Printf("%v ", times[i])
+			log.Printf("%v", times[i])
 		}
 		log.Printf("Largest: ")
 		for i := 10; i > 0; i-- {
-			log.Printf("%v ", times[nr-i])
+			log.Printf("%v", times[nr-i])
 		}
 	}
 }
