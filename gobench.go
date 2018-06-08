@@ -88,8 +88,8 @@ func doPostDocs(col driver.Collection) {
 	for j := 0; j < parallelism; j++ {
 		wg.Add(1)
 		go func(jj int) {
-			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
 			defer wg.Done()
+			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
 		}(j)
 	}
 
