@@ -43,21 +43,23 @@ func logStats(name string, times []time.Duration) {
 		sum += d
 	}
 	log.Printf("Statistics for %s:", name)
-	log.Printf("Number of samples: %d", nr)
-	log.Printf("Average: %v", sum/time.Duration(nr))
-	log.Printf("Median : %v", times[nr/2])
-	log.Printf("90%%    : %v", times[(nr*90)/100])
-	log.Printf("99%%    : %v", times[(nr*99)/100])
-	log.Printf("99.9%%  : %v", times[(nr*999)/1000])
+	log.Printf("Samples : %d", nr)
+	log.Printf("Average : %v", sum/time.Duration(nr))
+	log.Printf("Median  : %v", times[nr/2])
+	log.Printf("90%%     : %v", times[(nr*90)/100])
+	log.Printf("99%%     : %v", times[(nr*99)/100])
+	log.Printf("99.9%%   : %v", times[(nr*999)/1000])
 	if nr >= 20 {
-		log.Printf("Smallest: ")
+		s := ""
 		for i := 0; i < 10; i++ {
-			log.Printf("%v", times[i])
+			s = s + fmt.Sprintf(" %v", times[i])
 		}
-		log.Printf("Largest: ")
+		log.Printf("Smallest:%s", s)
+		s = ""
 		for i := 10; i > 0; i-- {
-			log.Printf("%v", times[nr-i])
+			s = s + fmt.Sprintf(" %v", times[nr-i])
 		}
+		log.Printf("Largest:%s", s)
 	}
 }
 
@@ -96,7 +98,6 @@ func doPostDocs(col driver.Collection) {
 	}
 
 	wg.Wait()
-	log.Printf("Hallo Welt")
 	logStats("create document ops", times)
 }
 
@@ -135,8 +136,8 @@ func main() {
 	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
 	flag.Parse()
 
-	fmt.Printf("Server endpoint: %s   ", endpoint)
-	fmt.Printf("using %d connections\n", nrConnections)
+	log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
+	log.Println()
 
 	var conn driver.Connection
 	var err error
@@ -202,6 +203,7 @@ func main() {
 	}
 	endTime := time.Now()
 
+	log.Println()
 	log.Printf("Time for %d requests: %v\n", nrRequests, endTime.Sub(startTime))
 
 	if cleanup {
