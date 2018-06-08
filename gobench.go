@@ -38,25 +38,25 @@ func logStats(name string, times []time.Duration) {
 	sort.Slice(times, func(a, b int) bool {
 		return int64(times[a]) < int64(times[b])
 	})
-	var sum int64 = 0
-	for i := 0; i < nr; i++ {
-		sum += int64(times[i])
+	var sum time.Duration
+	for _, d := range times {
+		sum += d
 	}
 	log.Printf("Statistics for %s:", name)
 	log.Printf("Number of samples: %d", nr)
-	log.Printf("Average: %v", time.Duration(sum/int64(nr)))
+	log.Printf("Average: %v", sum/time.Duration(nr))
 	log.Printf("Median : %v", times[nr/2])
-	log.Printf("90%%   : %v", times[(nr*90)/100])
-	log.Printf("99%%   : %v", times[(nr*99)/100])
-	log.Printf("99.9%% : %v", times[(nr*999)/1000])
+	log.Printf("90%%    : %v", times[(nr*90)/100])
+	log.Printf("99%%    : %v", times[(nr*99)/100])
+	log.Printf("99.9%%  : %v", times[(nr*999)/1000])
 	if nr >= 20 {
 		log.Printf("Smallest: ")
 		for i := 0; i < 10; i++ {
-			log.Printf("%v ", times[i])
+			log.Printf("%v", times[i])
 		}
 		log.Printf("Largest: ")
 		for i := 10; i > 0; i-- {
-			log.Printf("%v ", times[nr-i])
+			log.Printf("%v", times[nr-i])
 		}
 	}
 }
@@ -69,9 +69,8 @@ func doPostDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(times []time.Duration, nrRequestsPerWorker int) {
-		defer wg.Done()
-		for i := 0; i < nrRequestsPerWorker; i++ {
+	worker := func(innerTimes []time.Duration) {
+		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			book := Book{
 				Title:   "Some small string",
@@ -82,14 +81,18 @@ func doPostDocs(col driver.Collection) {
 				log.Fatalf("Failed to create document: %v", err)
 			}
 			endTime := time.Now()
-			times[i] = endTime.Sub(startTime)
+			innerTimes[i] = endTime.Sub(startTime)
 		}
 	}
 
 	for j := 0; j < parallelism; j++ {
 		wg.Add(1)
-		go worker(times[j*nrRequestsPerWorker:(j+1)*nrRequestsPerWorker],
-			nrRequestsPerWorker)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
+		}(j)
 	}
 
 	wg.Wait()
