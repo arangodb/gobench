@@ -69,8 +69,7 @@ func doPostDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(times []time.Duration, nrRequestsPerWorker int) {
-		defer wg.Done()
+	worker := func(times []time.Duration) {
 		for i := 0; i < nrRequestsPerWorker; i++ {
 			startTime := time.Now()
 			book := Book{
@@ -88,8 +87,10 @@ func doPostDocs(col driver.Collection) {
 
 	for j := 0; j < parallelism; j++ {
 		wg.Add(1)
-		go worker(times[j*nrRequestsPerWorker:(j+1)*nrRequestsPerWorker],
-			nrRequestsPerWorker)
+		go func(jj int) {
+			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
+			defer wg.Done()
+		}(j)
 	}
 
 	wg.Wait()
