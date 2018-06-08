@@ -69,7 +69,7 @@ func doPostDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(times []time.Duration) {
+	worker := func(innerTimes []time.Duration) {
 		for i := 0; i < nrRequestsPerWorker; i++ {
 			startTime := time.Now()
 			book := Book{
@@ -81,7 +81,7 @@ func doPostDocs(col driver.Collection) {
 				log.Fatalf("Failed to create document: %v", err)
 			}
 			endTime := time.Now()
-			times[i] = endTime.Sub(startTime)
+			innerTimes[i] = endTime.Sub(startTime)
 		}
 	}
 
@@ -89,6 +89,8 @@ func doPostDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
 		}(j)
 	}
