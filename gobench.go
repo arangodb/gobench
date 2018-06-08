@@ -38,13 +38,13 @@ func logStats(name string, times []time.Duration) {
 	sort.Slice(times, func(a, b int) bool {
 		return int64(times[a]) < int64(times[b])
 	})
-	var sum int64 = 0
-	for i := 0; i < nr; i++ {
-		sum += int64(times[i])
+	var sum time.Duration
+	for _, d := range times {
+		sum += d
 	}
 	log.Printf("Statistics for %s:", name)
 	log.Printf("Number of samples: %d", nr)
-	log.Printf("Average: %v", time.Duration(sum/int64(nr)))
+	log.Printf("Average: %v", sum/time.Duration(nr))
 	log.Printf("Median : %v", times[nr/2])
 	log.Printf("90%%    : %v", times[(nr*90)/100])
 	log.Printf("99%%    : %v", times[(nr*99)/100])
