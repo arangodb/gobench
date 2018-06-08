@@ -70,7 +70,7 @@ func doPostDocs(col driver.Collection) {
 	wg := sync.WaitGroup{}
 
 	worker := func(innerTimes []time.Duration) {
-		for i := 0; i < nrRequestsPerWorker; i++ {
+		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			book := Book{
 				Title:   "Some small string",
