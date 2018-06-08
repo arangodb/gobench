@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	driver "github.com/arangodb/go-driver"
@@ -26,6 +27,7 @@ var (
 	parallelism   int    = 1
 	cleanup       bool   = true
 	protocol      string = "HTTP" // can be "VST" as well
+	usetls        bool   = false
 )
 
 func logStats(name string, times []time.Duration) {
@@ -127,6 +129,7 @@ func main() {
 	flag.IntVar(&parallelism, "parallelism", parallelism, "parallelism")
 	flag.BoolVar(&cleanup, "cleanup", cleanup, "flag whether to perform cleanup")
 	flag.StringVar(&protocol, "protocol", protocol, "protocol: HTTP or VST")
+	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
 	flag.Parse()
 
 	fmt.Printf("Server endpoint: %s   ", endpoint)
@@ -135,20 +138,32 @@ func main() {
 	var conn driver.Connection
 	var err error
 	if protocol == "HTTP" {
-		conn, err = http.NewConnection(http.ConnectionConfig{
+		connConfig := http.ConnectionConfig{
 			Endpoints: []string{endpoint},
 			ConnLimit: nrConnections,
-		})
+		}
+		if usetls {
+			connConfig.TLSConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+		conn, err = http.NewConnection(connConfig)
 		if err != nil {
 			log.Fatalf("Failed to create HTTP connection: %v", err)
 		}
 	} else if protocol == "VST" {
-		conn, err = vst.NewConnection(vst.ConnectionConfig{
+		connConfig := vst.ConnectionConfig{
 			Endpoints: []string{endpoint},
 			Transport: vstproto.TransportConfig{
 				ConnLimit: nrConnections,
 			},
-		})
+		}
+		if usetls {
+			connConfig.TLSConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+		conn, err = vst.NewConnection(connConfig)
 		if err != nil {
 			log.Fatalf("Failed to create HTTP connection: %v", err)
 		}
