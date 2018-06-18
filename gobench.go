@@ -10,11 +10,13 @@ import (
 	vstproto "github.com/arangodb/go-driver/vst/protocol"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
 
 type Book struct {
+	Key     string `json:"_key,omitempty"`
 	Title   string `json:"title"`
 	NoPages int    `json:"no_pages"`
 }
@@ -75,6 +77,7 @@ func doPostDocs(col driver.Collection) {
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			book := Book{
+				Key:     "",
 				Title:   "Some small string",
 				NoPages: i,
 			}
@@ -101,14 +104,154 @@ func doPostDocs(col driver.Collection) {
 	logStats("create document ops", times)
 }
 
+func doSeedDocs(col driver.Collection) {
+	// Create documents with specific keys
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			book := Book{
+				Key:     "K" + strconv.Itoa(base+i),
+				Title:   "Some small string",
+				NoPages: i,
+			}
+			_, err := col.CreateDocument(nil, book)
+			if err != nil {
+				log.Fatalf("Failed to create document: %v", err)
+			}
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("seed document ops", times)
+}
+
+func doReadDocs(col driver.Collection) {
+	// Read seeded documents with specific keys
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			var book Book
+			key := "K" + strconv.Itoa(base+i)
+			if _, err := col.ReadDocument(nil, key, &book); err != nil {
+				log.Fatalf("Failed to read document: %v", err)
+			}
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("read document ops", times)
+}
+
+func doReadSameDocs(col driver.Collection) {
+	// Read always the same document
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			var book Book
+			key := "K" + strconv.Itoa(base)
+			if _, err := col.ReadDocument(nil, key, &book); err != nil {
+				log.Fatalf("Failed to read document: %v", err)
+			}
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("read same document ops", times)
+}
+
+func doVersion(client driver.Client) {
+	// Create documents with specific keys
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			_, err := client.Version(driver.WithDetails(nil, true))
+			if err != nil {
+				log.Fatalf("Error in /_api/version call: %v", err)
+			}
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("/_api/version", times)
+}
+
 // For later:
-//	// Read the document back
-//	var result Book
-//	if _, err := col.ReadDocument(nil, meta.Key, &result); err != nil {
-//		log.Fatalf("Failed to read document: %v", err)
-//	}
-//	fmt.Printf("Read book '%+v'\n", result)
-//
 //	// Get books by using AQL
 //	cur, err := db.Query(nil, "FOR b IN books RETURN b", nil)
 //	if err != nil {
@@ -200,6 +343,14 @@ func main() {
 	switch testcase {
 	case "postDocs":
 		doPostDocs(col)
+	case "seedDocs":
+		doSeedDocs(col)
+	case "readDocs":
+		doReadDocs(col)
+	case "readSameDocs":
+		doReadSameDocs(col)
+	case "version":
+		doVersion(c)
 	}
 	endTime := time.Now()
 
