@@ -356,7 +356,9 @@ func main() {
 
 	log.Println()
 	log.Printf("Time for %d requests: %v", nrRequests, endTime.Sub(startTime))
-	log.Printf("Reqs/s              : %d", int(float64(nrRequests)/float64(endTime.Sub(startTime))))
+	log.Printf("%v %v %v", float64(nrRequests), float64(endTime.Sub(startTime)),
+		float64(nrRequests)/float64(endTime.Sub(startTime)))
+	log.Printf("Reqs/s: %d", int(float64(nrRequests)/float64(endTime.Sub(startTime))))
 
 	if cleanup {
 		err = col.Remove(nil)
