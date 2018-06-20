@@ -252,6 +252,7 @@ func doVersion(client driver.Client) {
 }
 
 func doReadThreeDiamondAQL(client driver.Client) {
+	log.Printf("Setting up a database, collection and 100 documents...")
 	// Prepare a new books collection in some database:
 	db, err := client.Database(nil, "booksDB")
 	if err != nil {
@@ -283,6 +284,8 @@ func doReadThreeDiamondAQL(client driver.Client) {
 			log.Fatalf("Failed to create document: %v", err)
 		}
 	}
+
+	log.Printf("Done, let the race begin!")
 
 	// Does a lot of three diamond AQL queries
 	// Make nrRequests divisible by parallelism:
