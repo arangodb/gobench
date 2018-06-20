@@ -251,22 +251,95 @@ func doVersion(client driver.Client) {
 	logStats("/_api/version", times)
 }
 
-// For later:
-//	// Get books by using AQL
-//	cur, err := db.Query(nil, "FOR b IN books RETURN b", nil)
-//	if err != nil {
-//		log.Fatalf("Failed to ask for query cursor: %v", err)
-//	}
-//	for {
-//		meta, err = cur.ReadDocument(nil, &result)
-//		if err != nil {
-//			if driver.IsNoMoreDocuments(err) {
-//				break
-//			}
-//			log.Fatalf("Failed to read doc from cursor: %v", err)
-//		}
-//		fmt.Printf("Read book from cursor '%+v'\n", result)
-//	}
+func doReadThreeDiamondAQL(client driver.Client) {
+	// Prepare a new books collection in some database:
+	db, err := client.Database(nil, "booksDB")
+	if err != nil {
+		// Create a database
+		db, err = client.CreateDatabase(nil, "booksDB", nil)
+		if err != nil {
+			log.Fatalf("Failed to create database: %v", err)
+		}
+	}
+
+	// Create collection
+	col, err := db.Collection(nil, "books")
+	if err != nil {
+		col, err = db.CreateCollection(nil, "books", nil)
+		if err != nil {
+			log.Fatalf("Failed to create collection: %v", err)
+		}
+	}
+
+	// Write some books:
+	for i := 0; i < 100; i++ {
+		book := Book{
+			Key:     "K" + strconv.Itoa(i),
+			Title:   "Some small string",
+			NoPages: i,
+		}
+		_, err := col.CreateDocument(nil, book)
+		if err != nil {
+			log.Fatalf("Failed to create document: %v", err)
+		}
+	}
+
+	// Does a lot of three diamond AQL queries
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			var book Book
+
+			// Get books by using AQL
+			cur, err := db.Query(nil, "FOR b1 IN books FOR b2 IN books FILTER b1._key == b2._key FOR b3 IN books FILTER b3._key == b1._key LIMIT 10 RETURN {_key: b1._key, title: b2.title, no_pages: b3.no_pages}", nil)
+			if err != nil {
+				log.Fatalf("Failed to ask for query cursor: %v", err)
+			}
+			for {
+				_, err = cur.ReadDocument(nil, &book)
+				if err != nil {
+					if driver.IsNoMoreDocuments(err) {
+						break
+					}
+					log.Fatalf("Failed to read doc from cursor: %v", err)
+				}
+			}
+
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("read three diamond AQL ops", times)
+	if cleanup {
+		err = col.Remove(nil)
+		if err != nil {
+			log.Fatalf("Failed to drop collection: %v", err)
+		}
+		err = db.Remove(nil)
+		if err != nil {
+			log.Fatalf("Failed to drop database: %v", err)
+		}
+	}
+}
 
 func main() {
 	flag.IntVar(&nrConnections, "nrConnections", nrConnections, "number of connections")
@@ -349,6 +422,8 @@ func main() {
 		doReadDocs(col)
 	case "readSameDocs":
 		doReadSameDocs(col)
+	case "readThreeDiamondAQL":
+		doReadThreeDiamondAQL(c)
 	case "version":
 		doVersion(c)
 	}
