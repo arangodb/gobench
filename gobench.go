@@ -251,7 +251,7 @@ func doVersion(client driver.Client) {
 	logStats("/_api/version", times)
 }
 
-func doReadThreeDiamondAQL(client driver.Client) {
+func doInitThreeDiamondAQL(client driver.Client) (driver.Database, driver.Collection) {
 	log.Printf("Setting up a database, collection and 100 documents...")
 	// Prepare a new books collection in some database:
 	db, err := client.Database(nil, "booksDB")
@@ -270,6 +270,8 @@ func doReadThreeDiamondAQL(client driver.Client) {
 		if err != nil {
 			log.Fatalf("Failed to create collection: %v", err)
 		}
+	} else {
+		col.Truncate(nil)
 	}
 
 	// Write some books:
@@ -286,7 +288,10 @@ func doReadThreeDiamondAQL(client driver.Client) {
 	}
 
 	log.Printf("Done, let the race begin!")
+	return db, col
+}
 
+func doReadThreeDiamondAQL(db driver.Database, col driver.Collection) {
 	// Does a lot of three diamond AQL queries
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
@@ -333,7 +338,7 @@ func doReadThreeDiamondAQL(client driver.Client) {
 	wg.Wait()
 	logStats("read three diamond AQL ops", times)
 	if cleanup {
-		err = col.Remove(nil)
+		err := col.Remove(nil)
 		if err != nil {
 			log.Fatalf("Failed to drop collection: %v", err)
 		}
@@ -426,7 +431,9 @@ func main() {
 	case "readSameDocs":
 		doReadSameDocs(col)
 	case "readThreeDiamondAQL":
-		doReadThreeDiamondAQL(c)
+		AQLdb, AQLcol := doInitThreeDiamondAQL(c)
+		startTime = time.Now()
+		doReadThreeDiamondAQL(AQLdb, AQLcol)
 	case "version":
 		doVersion(c)
 	}
