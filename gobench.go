@@ -216,6 +216,46 @@ func doReadSameDocs(col driver.Collection) {
 	logStats("read same document ops", times)
 }
 
+func doReplaceDocs(col driver.Collection) {
+	// Will replace the seeded documents.
+	// Make nrRequests divisible by parallelism:
+	nrRequestsPerWorker := nrRequests / parallelism
+	nrRequests = nrRequestsPerWorker * parallelism
+	times := make([]time.Duration, nrRequests, nrRequests)
+	wg := sync.WaitGroup{}
+
+	worker := func(innerTimes []time.Duration, base int) {
+		for i := 0; i < len(innerTimes); i++ {
+			startTime := time.Now()
+			key := "K" + strconv.Itoa(base)
+			book := Book{
+				Key:     "K" + strconv.Itoa(base+i),
+				Title:   "Some small string",
+				NoPages: i,
+			}
+			if _, err := col.ReplaceDocument(nil, key, &book); err != nil {
+				log.Fatalf("Failed to replace document: %v", err)
+			}
+			endTime := time.Now()
+			innerTimes[i] = endTime.Sub(startTime)
+		}
+	}
+
+	for j := 0; j < parallelism; j++ {
+		wg.Add(1)
+		go func(jj int) {
+			defer wg.Done()
+			// Give non-overlapping slices to the workers which together cover
+			// the whole of times:
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				jj*nrRequestsPerWorker)
+		}(j)
+	}
+
+	wg.Wait()
+	logStats("replace same document ops", times)
+}
+
 func doVersion(client driver.Client) {
 	// Create documents with specific keys
 	// Make nrRequests divisible by parallelism:
@@ -227,7 +267,8 @@ func doVersion(client driver.Client) {
 	worker := func(innerTimes []time.Duration, base int) {
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
-			_, err := client.Version(driver.WithDetails(nil, true))
+			// _, err := client.Version(driver.WithDetails(nil, true))
+			_, err := client.Version(driver.WithDetails(nil, false))
 			if err != nil {
 				log.Fatalf("Error in /_api/version call: %v", err)
 			}
@@ -430,6 +471,8 @@ func main() {
 		doReadDocs(col)
 	case "readSameDocs":
 		doReadSameDocs(col)
+	case "replaceDocs":
+		doReplaceDocs(col)
 	case "readThreeDiamondAQL":
 		AQLdb, AQLcol := doInitThreeDiamondAQL(c)
 		startTime = time.Now()
