@@ -4,15 +4,16 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	driver "github.com/arangodb/go-driver"
-	"github.com/arangodb/go-driver/http"
-	"github.com/arangodb/go-driver/vst"
-	vstproto "github.com/arangodb/go-driver/vst/protocol"
 	"log"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
+
+	driver "github.com/arangodb/go-driver"
+	"github.com/arangodb/go-driver/http"
+	"github.com/arangodb/go-driver/vst"
+	vstproto "github.com/arangodb/go-driver/vst/protocol"
 )
 
 type Book struct {
@@ -22,14 +23,15 @@ type Book struct {
 }
 
 var (
-	nrConnections int    = 1
-	endpoint      string = "http://127.0.0.1:8529"
-	testcase      string = "postDocs"
-	nrRequests    int    = 1000
-	parallelism   int    = 1
-	cleanup       bool   = true
-	protocol      string = "HTTP" // can be "VST" as well
-	usetls        bool   = false
+	nrConnections int           = 1
+	endpoint      string        = "http://127.0.0.1:8529"
+	testcase      string        = "postDocs"
+	nrRequests    int           = 1000
+	parallelism   int           = 1
+	delay         time.Duration = 0
+	cleanup       bool          = true
+	protocol      string        = "HTTP" // can be "VST" as well
+	usetls        bool          = false
 )
 
 func logStats(name string, times []time.Duration) {
@@ -73,7 +75,8 @@ func doPostDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration) {
+	worker := func(innerTimes []time.Duration, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			book := Book{
@@ -87,6 +90,7 @@ func doPostDocs(col driver.Collection) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -94,9 +98,11 @@ func doPostDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
-			worker(times[jj*nrRequestsPerWorker : (jj+1)*nrRequestsPerWorker])
+			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
+				initTime)
 		}(j)
 	}
 
@@ -112,7 +118,8 @@ func doSeedDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			book := Book{
@@ -126,6 +133,7 @@ func doSeedDocs(col driver.Collection) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -133,10 +141,11 @@ func doSeedDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -152,7 +161,8 @@ func doReadDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			var book Book
@@ -162,6 +172,7 @@ func doReadDocs(col driver.Collection) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -169,10 +180,11 @@ func doReadDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -188,7 +200,8 @@ func doReadSameDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			var book Book
@@ -198,6 +211,7 @@ func doReadSameDocs(col driver.Collection) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -205,10 +219,11 @@ func doReadSameDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -224,7 +239,8 @@ func doReplaceDocs(col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			key := "K" + strconv.Itoa(base)
@@ -238,6 +254,7 @@ func doReplaceDocs(col driver.Collection) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -245,10 +262,11 @@ func doReplaceDocs(col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -264,7 +282,8 @@ func doVersion(client driver.Client) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			// _, err := client.Version(driver.WithDetails(nil, true))
@@ -274,6 +293,7 @@ func doVersion(client driver.Client) {
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -281,10 +301,11 @@ func doVersion(client driver.Client) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -340,7 +361,8 @@ func doReadThreeDiamondAQL(db driver.Database, col driver.Collection) {
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
-	worker := func(innerTimes []time.Duration, base int) {
+	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
+		time.Sleep(initDelay)
 		for i := 0; i < len(innerTimes); i++ {
 			startTime := time.Now()
 			var book Book
@@ -362,6 +384,7 @@ func doReadThreeDiamondAQL(db driver.Database, col driver.Collection) {
 
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
+			time.Sleep(delay)
 		}
 	}
 
@@ -369,10 +392,11 @@ func doReadThreeDiamondAQL(db driver.Database, col driver.Collection) {
 		wg.Add(1)
 		go func(jj int) {
 			defer wg.Done()
+			initTime := time.Duration(jj * int(delay) / parallelism)
 			// Give non-overlapping slices to the workers which together cover
 			// the whole of times:
 			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker)
+				jj*nrRequestsPerWorker, initTime)
 		}(j)
 	}
 
@@ -396,6 +420,7 @@ func main() {
 	flag.StringVar(&testcase, "testcase", testcase, "test case")
 	flag.IntVar(&nrRequests, "nrRequests", nrRequests, "number of requests")
 	flag.IntVar(&parallelism, "parallelism", parallelism, "parallelism")
+	flag.DurationVar(&delay, "delay", delay, "delay per thread between operations")
 	flag.BoolVar(&cleanup, "cleanup", cleanup, "flag whether to perform cleanup")
 	flag.StringVar(&protocol, "protocol", protocol, "protocol: HTTP or VST")
 	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
