@@ -16,6 +16,7 @@ import (
 	vstproto "github.com/arangodb/go-driver/vst/protocol"
 )
 
+// Book is the basic data structure used for tests
 type Book struct {
 	Key     string `json:"_key,omitempty"`
 	Title   string `json:"title"`
@@ -32,6 +33,8 @@ var (
 	cleanup       bool          = true
 	protocol      string        = "HTTP" // can be "VST" as well
 	usetls        bool          = false
+	username      string
+	password      string
 )
 
 func logStats(name string, times []time.Duration) {
@@ -424,6 +427,8 @@ func main() {
 	flag.BoolVar(&cleanup, "cleanup", cleanup, "flag whether to perform cleanup")
 	flag.StringVar(&protocol, "protocol", protocol, "protocol: HTTP or VST")
 	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
+	flag.StringVar(&username, "auth.user", username, "Authentication Username")
+	flag.StringVar(&password, "auth.pass", password, "Authentication Password")
 	flag.Parse()
 
 	log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
@@ -464,9 +469,16 @@ func main() {
 	} else {
 		log.Fatalf("-protocol needs to be HTTP or VST")
 	}
-	c, err := driver.NewClient(driver.ClientConfig{
+
+	clientConfig := driver.ClientConfig{
 		Connection: conn,
-	})
+	}
+
+	if username != "" {
+		clientConfig.Authentication = driver.BasicAuthentication(username, password)
+	}
+
+	c, err := driver.NewClient(clientConfig)
 
 	db, err := c.Database(nil, "benchDB")
 	if err != nil {
