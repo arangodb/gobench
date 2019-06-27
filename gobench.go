@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strconv"
 	"sync"
@@ -35,9 +36,64 @@ var (
 	usetls        bool          = false
 	username      string
 	password      string
+	outputFormat  string        = "console" // can be "csv"
+        branch        string        = "unset"   // used for CSV output
 )
 
 func logStats(name string, times []time.Duration) {
+        if outputFormat == "console" {
+                logStatsConsole(name, times);
+        } else if outputFormat == "csv" {
+                logStatsCSV(name, times);
+        } else {
+                log.Fatalf("unknown output format %s", outputFormat)
+        }
+}
+
+// Output log stats as comma separated values, the columns are
+//
+// - ArangoDB branch name set via command line
+// - Unix time stamp
+// - test name
+// - average time taken
+// - median time
+// - minimum
+// - maximum
+// - standard deviation
+//
+// all timings are in microseconds
+//
+func logStatsCSV(name string, times []time.Duration) {
+	nr := len(times)
+	if nr == 0 {
+		return
+	}
+	sort.Slice(times, func(a, b int) bool {
+		return int64(times[a]) < int64(times[b])
+	})
+	var sum time.Duration
+	for _, d := range times {
+		sum += d
+	}
+        var mean = (sum/time.Duration(nr))
+        var sqrdiff time.Duration
+        for _, d := range times {
+                sqrdiff += (d - mean) * (d - mean)
+        }
+        var stddev = math.Sqrt((sqrdiff / time.Duration(nr)).Seconds())
+	fmt.Printf("%s,%v,%s,%v,%v,%v,%v,%.2f,%s",
+                branch,                                      // ArangoDB branch name
+                time.Now().Unix(),                           // Unix timestamp
+                name,                                        // test name
+                mean.Nanoseconds()/1000,                     // mean
+                times[nr/2].Nanoseconds()/1000,              // median
+                times[0].Nanoseconds()/1000,                 // minimum
+                times[nr-1].Nanoseconds()/1000,              // maximum
+                stddev,                                      // standard deviation
+                "");                                         // collection label
+}
+
+func logStatsConsole(name string, times []time.Duration) {
 	nr := len(times)
 	if nr == 0 {
 		return
@@ -429,10 +485,18 @@ func main() {
 	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
 	flag.StringVar(&username, "auth.user", username, "Authentication Username")
 	flag.StringVar(&password, "auth.pass", password, "Authentication Password")
+        flag.StringVar(&outputFormat, "outputFormat", outputFormat, "output format: console or csv")
+        flag.StringVar(&branch, "branch", branch, "ArangoDB branch name for CSV output")
 	flag.Parse()
 
-	log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
-	log.Println()
+        if outputFormat != "console" && outputFormat != "csv" {
+                log.Fatalf("-outputFormat needs to be console or csv")
+        }
+
+        if outputFormat == "console" {
+                log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
+                log.Println()
+        }
 
 	var conn driver.Connection
 	var err error
@@ -519,9 +583,11 @@ func main() {
 	}
 	endTime := time.Now()
 
-	log.Println()
-	log.Printf("Time for %d requests: %v", nrRequests, endTime.Sub(startTime))
-	log.Printf("Reqs/s: %d", int(float64(nrRequests)/(float64(endTime.Sub(startTime))/1000000000.0)))
+        if outputFormat == "console" {
+                log.Println()
+                log.Printf("Time for %d requests: %v", nrRequests, endTime.Sub(startTime))
+                log.Printf("Reqs/s: %d", int(float64(nrRequests)/(float64(endTime.Sub(startTime))/1000000000.0)))
+        }
 
 	if cleanup {
 		err = col.Remove(nil)
