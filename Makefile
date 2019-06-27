@@ -19,7 +19,7 @@ SOURCES := $(shell find . -name '*.go')
 all: build
 
 build: $(GOBUILDDIR) $(SOURCES)
-	GOPATH=$(GOBUILDDIR) go build -v $(REPOPATH)
+	GOPATH=$(GOBUILDDIR) CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -installsuffix netgo -ldflags -v $(REPOPATH)
 
 clean:
 	rm -Rf $(GOBUILDDIR)
