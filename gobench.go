@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+        "io/ioutil"
 	"log"
 	"math"
 	"sort"
@@ -38,6 +39,8 @@ var (
 	password      string
 	outputFormat  string        = "console" // can be "csv"
         branch        string        = "unset"   // used for CSV output
+
+        submittedRequests int       = 0         // the number of requests submitted
 )
 
 func logStats(name string, times []time.Duration) {
@@ -75,17 +78,18 @@ func logStatsCSV(name string, times []time.Duration) {
 	for _, d := range times {
 		sum += d
 	}
-        var mean = (sum/time.Duration(nr))
-        var sqrdiff time.Duration
+        var mean = (sum/time.Duration(nr)).Nanoseconds() / 1000
+        var sqrdiff float64
         for _, d := range times {
-                sqrdiff += (d - mean) * (d - mean)
+                var tmp = float64(d.Nanoseconds()/1000.0 - mean)
+                sqrdiff += tmp * tmp
         }
-        var stddev = math.Sqrt((sqrdiff / time.Duration(nr)).Seconds())
-	fmt.Printf("%s,%v,%s,%v,%v,%v,%v,%.2f,%s",
+        var stddev = math.Sqrt(sqrdiff / float64(nr))
+	fmt.Printf("%s,%v,%s,%v,%v,%v,%v,%.2f,%s\n",
                 branch,                                      // ArangoDB branch name
                 time.Now().Unix(),                           // Unix timestamp
                 name,                                        // test name
-                mean.Nanoseconds()/1000,                     // mean
+                mean,                                        // mean
                 times[nr/2].Nanoseconds()/1000,              // median
                 times[0].Nanoseconds()/1000,                 // minimum
                 times[nr-1].Nanoseconds()/1000,              // maximum
@@ -131,6 +135,7 @@ func doPostDocs(col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -174,6 +179,7 @@ func doSeedDocs(col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -217,6 +223,7 @@ func doReadDocs(col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -256,6 +263,7 @@ func doReadSameDocs(col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -295,6 +303,7 @@ func doReplaceDocs(col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -338,6 +347,7 @@ func doVersion(client driver.Client) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -417,6 +427,7 @@ func doReadThreeDiamondAQL(db driver.Database, col driver.Collection) {
 	// Make nrRequests divisible by parallelism:
 	nrRequestsPerWorker := nrRequests / parallelism
 	nrRequests = nrRequestsPerWorker * parallelism
+	submittedRequests += nrRequests
 	times := make([]time.Duration, nrRequests, nrRequests)
 	wg := sync.WaitGroup{}
 
@@ -493,10 +504,13 @@ func main() {
                 log.Fatalf("-outputFormat needs to be console or csv")
         }
 
-        if outputFormat == "console" {
-                log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
-                log.Println()
+        // If we log to CSV we suppress Logger output and use fmt to print.
+        if outputFormat == "csv" {
+                log.SetOutput(ioutil.Discard)
         }
+
+        log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
+        log.Println()
 
 	var conn driver.Connection
 	var err error
@@ -578,16 +592,23 @@ func main() {
 		AQLdb, AQLcol := doInitThreeDiamondAQL(c)
 		startTime = time.Now()
 		doReadThreeDiamondAQL(AQLdb, AQLcol)
+        case "all":
+		AQLdb, AQLcol := doInitThreeDiamondAQL(c)
+		startTime = time.Now()
+                doPostDocs(col)
+                doSeedDocs(col)
+                doReadDocs(col)
+                doReadSameDocs(col)
+                doReplaceDocs(col)
+		doReadThreeDiamondAQL(AQLdb, AQLcol)
 	case "version":
 		doVersion(c)
 	}
 	endTime := time.Now()
 
-        if outputFormat == "console" {
-                log.Println()
-                log.Printf("Time for %d requests: %v", nrRequests, endTime.Sub(startTime))
-                log.Printf("Reqs/s: %d", int(float64(nrRequests)/(float64(endTime.Sub(startTime))/1000000000.0)))
-        }
+        log.Println()
+        log.Printf("Time for %d requests: %v", submittedRequests, endTime.Sub(startTime))
+        log.Printf("Reqs/s: %d", int(float64(submittedRequests)/(float64(endTime.Sub(startTime))/1000000000.0)))
 
 	if cleanup {
 		err = col.Remove(nil)
