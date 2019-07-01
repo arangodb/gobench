@@ -38,7 +38,6 @@ var (
         username      string
         password      string
         outputFormat  string        = "console" // can be "csv"
-        branch        string        = "unset"   // used for CSV output
 
         submittedRequests int       = 0         // the number of requests submitted
 )
@@ -55,8 +54,6 @@ func logStats(name string, times []time.Duration) {
 
 // Output log stats as comma separated values, the columns are
 //
-// - ArangoDB branch name set via command line
-// - Unix time stamp
 // - test name
 // - average time taken
 // - median time
@@ -85,9 +82,7 @@ func logStatsCSV(name string, times []time.Duration) {
                 sqrdiff += tmp * tmp
         }
         var stddev = math.Sqrt(sqrdiff / float64(nr))
-        fmt.Printf("%s,%v,%s,%v,%v,%v,%v,%.2f,%s\n",
-                branch,                                      // ArangoDB branch name
-                time.Now().Unix(),                           // Unix timestamp
+        fmt.Printf("%s,%v,%v,%v,%v,%.2f,%s\n",
                 name,                                        // test name
                 mean,                                        // mean
                 times[nr/2].Nanoseconds()/1000,              // median
@@ -497,7 +492,6 @@ func main() {
         flag.StringVar(&username, "auth.user", username, "Authentication Username")
         flag.StringVar(&password, "auth.pass", password, "Authentication Password")
         flag.StringVar(&outputFormat, "outputFormat", outputFormat, "output format: console or csv")
-        flag.StringVar(&branch, "branch", branch, "ArangoDB branch name for CSV output")
         flag.Parse()
 
         if outputFormat != "console" && outputFormat != "csv" {
