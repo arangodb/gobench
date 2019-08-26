@@ -567,9 +567,9 @@ func main() {
         col, err := db.Collection(nil, "test")
         if err != nil {
                 opts := driver.CreateCollectionOptions{
-                        ReplicationFactor: replFactor
+                        ReplicationFactor: replFactor,
                 }
-                col, err = db.CreateCollection(nil, "test", nil)
+                col, err = db.CreateCollection(nil, "test", &opts)
                 if err != nil {
                         log.Fatalf("Failed to create collection: %v", err)
                 }
