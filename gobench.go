@@ -29,6 +29,7 @@ var (
         nrConnections int           = 1
         endpoint      string        = "http://127.0.0.1:8529"
         testcase      string        = "postDocs"
+        replFactor    int           = 1 
         nrRequests    int           = 1000
         parallelism   int           = 1
         delay         time.Duration = 0
@@ -483,6 +484,7 @@ func main() {
         flag.IntVar(&nrConnections, "nrConnections", nrConnections, "number of connections")
         flag.StringVar(&endpoint, "endpoint", endpoint, "server endpoint")
         flag.StringVar(&testcase, "testcase", testcase, "test case")
+        flag.IntVar(&replFactor, "replicationFactor", replFactor, "replication factor of collection")
         flag.IntVar(&nrRequests, "nrRequests", nrRequests, "number of requests")
         flag.IntVar(&parallelism, "parallelism", parallelism, "parallelism")
         flag.DurationVar(&delay, "delay", delay, "delay per thread between operations")
@@ -564,7 +566,10 @@ func main() {
         // Create collection
         col, err := db.Collection(nil, "test")
         if err != nil {
-                col, err = db.CreateCollection(nil, "test", nil)
+                opts := driver.CreateCollectionOptions{
+                        ReplicationFactor: replFactor,
+                }
+                col, err = db.CreateCollection(nil, "test", &opts)
                 if err != nil {
                         log.Fatalf("Failed to create collection: %v", err)
                 }
