@@ -7,6 +7,9 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"net"
+
+	//"net"
 	"sort"
 	"strconv"
 	"sync"
@@ -16,6 +19,7 @@ import (
 	"github.com/arangodb/go-driver/http"
 	"github.com/arangodb/go-driver/vst"
 	vstproto "github.com/arangodb/go-driver/vst/protocol"
+	"golang.org/x/net/http2"
 )
 
 // Book is the basic data structure used for tests
@@ -489,7 +493,7 @@ func main() {
 	flag.IntVar(&parallelism, "parallelism", parallelism, "parallelism")
 	flag.DurationVar(&delay, "delay", delay, "delay per thread between operations")
 	flag.BoolVar(&cleanup, "cleanup", cleanup, "flag whether to perform cleanup")
-	flag.StringVar(&protocol, "protocol", protocol, "protocol: HTTP or VST")
+	flag.StringVar(&protocol, "protocol", protocol, "protocol: HTTP or VST or HTTP2")
 	flag.BoolVar(&usetls, "useTLS", usetls, "flag whether to use TLS")
 	flag.StringVar(&username, "auth.user", username, "Authentication Username")
 	flag.StringVar(&password, "auth.pass", password, "Authentication Password")
@@ -513,6 +517,7 @@ func main() {
 	if protocol == "HTTP" {
 		connConfig := http.ConnectionConfig{
 			Endpoints: []string{endpoint},
+			ContentType: driver.ContentTypeVelocypack,
 			ConnLimit: nrConnections,
 		}
 		if usetls {
@@ -540,8 +545,36 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to create HTTP connection: %v", err)
 		}
+	} else if protocol == "HTTP2" {
+		var connConfig http.ConnectionConfig
+		if usetls {
+			connConfig = http.ConnectionConfig{
+				Endpoints: []string{endpoint},
+				ContentType: driver.ContentTypeVelocypack,
+				ConnLimit: nrConnections,
+				Transport: &http2.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		} else {
+			connConfig = http.ConnectionConfig{
+				Endpoints: []string{endpoint},
+				ContentType: driver.ContentTypeVelocypack,
+				ConnLimit: nrConnections,
+				Transport: &http2.Transport{
+					AllowHTTP:       true,
+					DialTLS: func(network, addr string, cfg *tls.Config) (net.Conn, error) {
+						return net.Dial(network, addr)
+					},
+				},
+			}
+		}
+		conn, err = http.NewConnection(connConfig)
+		if err != nil {
+			log.Fatalf("Failed to create HTTP2 connection: %v", err)
+		}
 	} else {
-		log.Fatalf("-protocol needs to be HTTP or VST")
+		log.Fatalf("-protocol needs to be HTTP or VST or HTTP2")
 	}
 
 	clientConfig := driver.ClientConfig{
