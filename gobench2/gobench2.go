@@ -7,7 +7,9 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"net"
 	"net/http"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -83,7 +85,7 @@ func logStatsCSV(name string, times []time.Duration) {
 		sqrdiff += tmp * tmp
 	}
 	var stddev = math.Sqrt(sqrdiff / float64(nr))
-	fmt.Printf("%s,%v,%v,%v,%v,%.2f,%s\n",
+	fmt.Printf("%s,%+v,%+v,%+v,%+v,%.2f,%s\n",
 		name,                           // test name
 		mean,                           // mean
 		times[nr/2].Nanoseconds()/1000, // median
@@ -107,66 +109,38 @@ func logStatsConsole(name string, times []time.Duration) {
 	}
 	log.Printf("Statistics for %s:", name)
 	log.Printf("Samples : %d", nr)
-	log.Printf("Average : %v", sum/time.Duration(nr))
-	log.Printf("Median  : %v", times[nr/2])
-	log.Printf("90%%     : %v", times[(nr*90)/100])
-	log.Printf("99%%     : %v", times[(nr*99)/100])
-	log.Printf("99.9%%   : %v", times[(nr*999)/1000])
+	log.Printf("Time/T  : %+v", sum/time.Duration(parallelism))
+	log.Printf("S/Sec   : %f", float64(nr)/(float64(sum)/float64(time.Second)/float64(parallelism)))
+	log.Printf("Average : %+v", sum/time.Duration(nr))
+	log.Printf("Median  : %+v", times[nr/2])
+	log.Printf("90%%     : %+v", times[(nr*90)/100])
+	log.Printf("99%%     : %+v", times[(nr*99)/100])
+	log.Printf("99.9%%   : %+v", times[(nr*999)/1000])
 	if nr >= 20 {
 		s := ""
 		for i := 0; i < 10; i++ {
-			s = s + fmt.Sprintf(" %v", times[i])
+			s = s + fmt.Sprintf(" %+v", times[i])
 		}
 		log.Printf("Smallest:%s", s)
 		s = ""
 		for i := 10; i > 0; i-- {
-			s = s + fmt.Sprintf(" %v", times[nr-i])
+			s = s + fmt.Sprintf(" %+v", times[nr-i])
 		}
 		log.Printf("Largest:%s", s)
 	}
 }
 
 func doPostDocs(col arangodb.Collection) {
-	// Create documents
-	// Make nrRequests divisible by parallelism:
-	nrRequestsPerWorker := nrRequests / parallelism
-	nrRequests = nrRequestsPerWorker * parallelism
-	submittedRequests += nrRequests
-	times := make([]time.Duration, nrRequests, nrRequests)
-	wg := sync.WaitGroup{}
-
-	worker := func(innerTimes []time.Duration, initDelay time.Duration) {
-		time.Sleep(initDelay)
-		for i := 0; i < len(innerTimes); i++ {
-			startTime := time.Now()
-			book := Book{
-				Key:     "",
-				Title:   "Some small string",
-				NoPages: i,
-			}
-			_, err := col.CreateDocument(nil, book)
-			if err != nil {
-				log.Fatalf("Failed to create document: %v", err)
-			}
-			endTime := time.Now()
-			innerTimes[i] = endTime.Sub(startTime)
-			time.Sleep(delay)
+	_, times := call(nrRequests, parallelism)(func(id int) error {
+		book := Book{
+			Key:     "",
+			Title:   "Some small string",
+			NoPages: id,
 		}
-	}
-
-	for j := 0; j < parallelism; j++ {
-		wg.Add(1)
-		go func(jj int) {
-			defer wg.Done()
-			initTime := time.Duration(jj * int(delay) / parallelism)
-			// Give non-overlapping slices to the workers which together cover
-			// the whole of times:
-			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				initTime)
-		}(j)
-	}
-
-	wg.Wait()
+		_, err := col.CreateDocument(nil, book)
+		return err
+	})
+	submittedRequests += len(times)
 	logStats("create document ops", times)
 }
 
@@ -190,7 +164,7 @@ func doSeedDocs(col arangodb.Collection) {
 			}
 			_, err := col.CreateDocument(nil, book)
 			if err != nil {
-				log.Fatalf("Failed to create document: %v", err)
+				log.Fatalf("Failed to create document: %+v", err)
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
@@ -230,7 +204,7 @@ func doReadDocs(col arangodb.Collection) {
 			var book Book
 			key := "K" + strconv.Itoa(base+i)
 			if _, err := col.ReadDocument(nil, key, &book); err != nil {
-				log.Fatalf("Failed to read document: %v", err)
+				log.Fatalf("Failed to read document: %+v", err)
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
@@ -270,7 +244,7 @@ func doReadSameDocs(col arangodb.Collection) {
 			var book Book
 			key := "K" + strconv.Itoa(base)
 			if _, err := col.ReadDocument(nil, key, &book); err != nil {
-				log.Fatalf("Failed to read document: %v", err)
+				log.Fatalf("Failed to read document: %+v", err)
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
@@ -314,7 +288,7 @@ func doReplaceDocs(col arangodb.Collection) {
 				NoPages: i,
 			}
 			if _, err := col.UpdateDocument(nil, key, &book); err != nil {
-				log.Fatalf("Failed to replace document: %v", err)
+				log.Fatalf("Failed to replace document: %+v", err)
 			}
 			endTime := time.Now()
 			innerTimes[i] = endTime.Sub(startTime)
@@ -338,45 +312,63 @@ func doReplaceDocs(col arangodb.Collection) {
 	logStats("replace same document ops", times)
 }
 
-func doVersion(client arangodb.Client) {
-	// Create documents with specific keys
-	// Make nrRequests divisible by parallelism:
-	nrRequestsPerWorker := nrRequests / parallelism
-	nrRequests = nrRequestsPerWorker * parallelism
-	submittedRequests += nrRequests
-	times := make([]time.Duration, nrRequests, nrRequests)
-	wg := sync.WaitGroup{}
+func doVersionRaw(conn connection.Connection, client arangodb.Client) {
+	_, times := call(nrRequests, parallelism)(func(id int) error {
+		_, err := connection.CallGet(nil, conn, "/_api/version", nil)
+		return err
+	})
+	submittedRequests += len(times)
+	logStats("RAW /_api/version", times)
+}
 
-	worker := func(innerTimes []time.Duration, base int, initDelay time.Duration) {
-		time.Sleep(initDelay)
-		for i := 0; i < len(innerTimes); i++ {
-			startTime := time.Now()
-			// _, err := client.Version(arangodb.WithDetails(nil, true))
-			//_, err := client.Version(arangodb.WithDetails(nil, false))
-			_, err := client.Version(nil)
-			if err != nil {
-				log.Fatalf("Error in /_api/version call: %v", err)
-			}
-			endTime := time.Now()
-			innerTimes[i] = endTime.Sub(startTime)
-			time.Sleep(delay)
-		}
-	}
-
-	for j := 0; j < parallelism; j++ {
-		wg.Add(1)
-		go func(jj int) {
-			defer wg.Done()
-			initTime := time.Duration(jj * int(delay) / parallelism)
-			// Give non-overlapping slices to the workers which together cover
-			// the whole of times:
-			worker(times[jj*nrRequestsPerWorker:(jj+1)*nrRequestsPerWorker],
-				jj*nrRequestsPerWorker, initTime)
-		}(j)
-	}
-
-	wg.Wait()
+func doVersion(conn connection.Connection, client arangodb.Client) {
+	_, times := call(nrRequests, parallelism)(func(id int) error {
+		_, err := client.Version(nil)
+		return err
+	})
+	submittedRequests += len(times)
 	logStats("/_api/version", times)
+}
+
+func call(requests, parallelism int) func(call func(id int) error) (time.Duration, []time.Duration) {
+	return func(call func(id int) error) (time.Duration, []time.Duration) {
+		var wg sync.WaitGroup
+
+		times := make([]time.Duration, requests, requests)
+		c := initParallelChannel(requests)
+
+		start := time.Now()
+
+		for i := 0; i < parallelism; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+
+				for req := range c {
+					t := time.Now()
+					if err := call(req); err != nil {
+						log.Fatalf("Error test: %+v", err)
+					}
+					times[req] = time.Now().Sub(t)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		return time.Now().Sub(start), times
+	}
+}
+
+func initParallelChannel(count int) <-chan int {
+	r := make(chan int, count)
+	defer close(r)
+
+	for i := 0; i < count; i++ {
+		r <- i
+	}
+
+	return r
 }
 
 func doInitThreeDiamondAQL(client arangodb.Client) (arangodb.Database, arangodb.Collection) {
@@ -387,7 +379,7 @@ func doInitThreeDiamondAQL(client arangodb.Client) (arangodb.Database, arangodb.
 		// Create a database
 		db, err = client.CreateDatabase(nil, "booksDB", nil)
 		if err != nil {
-			log.Fatalf("Failed to create database: %v", err)
+			log.Fatalf("Failed to create database: %+v", err)
 		}
 	}
 
@@ -398,7 +390,7 @@ func doInitThreeDiamondAQL(client arangodb.Client) (arangodb.Database, arangodb.
 	}
 	col, err = db.CreateCollection(nil, "books", nil)
 	if err != nil {
-		log.Fatalf("Failed to create collection: %v", err)
+		log.Fatalf("Failed to create collection: %+v", err)
 	}
 
 	// Write some books:
@@ -410,7 +402,7 @@ func doInitThreeDiamondAQL(client arangodb.Client) (arangodb.Database, arangodb.
 		}
 		_, err := col.CreateDocument(nil, book)
 		if err != nil {
-			log.Fatalf("Failed to create document: %v", err)
+			log.Fatalf("Failed to create document: %+v", err)
 		}
 	}
 
@@ -436,12 +428,12 @@ func doReadThreeDiamondAQL(db arangodb.Database, col arangodb.Collection) {
 			// Get books by using AQL
 			cur, err := db.Query(nil, "FOR b1 IN books FOR b2 IN books FILTER b1._key == b2._key FOR b3 IN books FILTER b3._key == b1._key LIMIT 10 RETURN {_key: b1._key, title: b2.title, no_pages: b3.no_pages}", nil)
 			if err != nil {
-				log.Fatalf("Failed to ask for query cursor: %v", err)
+				log.Fatalf("Failed to ask for query cursor: %+v", err)
 			}
 			for cur.HasMore() {
 				_, err = cur.ReadDocument(nil, &book)
 				if err != nil {
-					log.Fatalf("Failed to read doc from cursor: %v", err)
+					log.Fatalf("Failed to read doc from cursor: %+v", err)
 				}
 			}
 
@@ -468,11 +460,11 @@ func doReadThreeDiamondAQL(db arangodb.Database, col arangodb.Collection) {
 	if cleanup {
 		err := col.Remove(nil)
 		if err != nil {
-			log.Fatalf("Failed to drop collection: %v", err)
+			log.Fatalf("Failed to drop collection: %+v", err)
 		}
 		err = db.Remove(nil)
 		if err != nil {
-			log.Fatalf("Failed to drop database: %v", err)
+			log.Fatalf("Failed to drop database: %+v", err)
 		}
 	}
 }
@@ -505,62 +497,14 @@ func main() {
 	log.Printf("Server endpoint: %s using %d connections", endpoint, nrConnections)
 	log.Println()
 
-	var conn connection.Connection
-	var err error
-	if protocol == "HTTP" {
-		connConfig := connection.HttpConfiguration{
-			Endpoint: connection.NewEndpoints(endpoint),
-			ContentType: connection.ApplicationVPack,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{ InsecureSkipVerify: true },
-			},
-		}
-		conn = connection.NewHttpConnection(connConfig)
-	//} else if protocol == "VST" {
-	//	connConfig := vst.ConnectionConfig{
-	//		Endpoints: []string{endpoint},
-	//		Transport: vstproto.TransportConfig{
-	//			ConnLimit: nrConnections,
-	//		},
-	//	}
-	//	if usetls {
-	//		connConfig.TLSConfig = &tls.Config{
-	//			InsecureSkipVerify: true,
-	//		}
-	//	}
-	//	conn, err := vst.NewConnection(connConfig)
-	//	if err != nil {
-	//		log.Fatalf("Failed to create HTTP connection: %v", err)
-	//	}
-	} else if protocol == "HTTP2" {
-		var connConfig connection.Http2Configuration
-		if usetls {
-			connConfig = connection.Http2Configuration{
-				Endpoint: connection.NewEndpoints(endpoint),
-				ContentType: connection.ApplicationVPack,
-				Transport: &http2.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			}
-		} else {
-			connConfig = connection.Http2Configuration{
-				Endpoint: connection.NewEndpoints(endpoint),
-				ContentType: connection.ApplicationVPack,
-				Transport: &http2.Transport{
-					AllowHTTP:       true,
-					DialTLS: connection.NewHTTP2DialForEndpoint(connection.NewEndpoints(endpoint)),
-				},
-			}
-		}
-		conn = connection.NewHttp2Connection(connConfig)
-	} else {
-		log.Fatalf("-protocol needs to be HTTP or HTTP2")
-	}
+	runtime.GOMAXPROCS(nrConnections)
 
-	if username != "" {
-		auth := connection.NewBasicAuth(username, password)
-		conn.SetAuthentication(auth)
-  }
+	var err error
+
+	conn, err := connection.NewPool(1, connectionFactory)
+	if err != nil {
+		log.Fatalf("Failed to create connection: %+v", err)
+	}
 
 	c := arangodb.NewClient(conn)
 
@@ -569,7 +513,7 @@ func main() {
 		// Create a database
 		db, err = c.CreateDatabase(nil, "benchDB", nil)
 		if err != nil {
-			log.Fatalf("Failed to create database: %v", err)
+			log.Fatalf("Failed to create database: %+v", err)
 		}
 	}
 
@@ -581,7 +525,7 @@ func main() {
 		}
 		col, err = db.CreateCollection(nil, "test", &opts)
 		if err != nil {
-			log.Fatalf("Failed to create collection: %v", err)
+			log.Fatalf("Failed to create collection: %+v", err)
 		}
 	}
 
@@ -611,22 +555,76 @@ func main() {
 		doReplaceDocs(col)
 		doReadThreeDiamondAQL(AQLdb, AQLcol)
 	case "version":
-		doVersion(c)
+		doVersion(conn, c)
+		doVersionRaw(conn, c)
 	}
 	endTime := time.Now()
 
 	log.Println()
-	log.Printf("Time for %d requests: %v", submittedRequests, endTime.Sub(startTime))
+	log.Printf("Time for %d requests: %+v", submittedRequests, endTime.Sub(startTime))
 	log.Printf("Reqs/s: %d", int(float64(submittedRequests)/(float64(endTime.Sub(startTime))/1000000000.0)))
 
 	if cleanup {
 		err = col.Remove(nil)
 		if err != nil {
-			log.Fatalf("Failed to drop collection: %v", err)
+			log.Fatalf("Failed to drop collection: %+v", err)
 		}
 		err = db.Remove(nil)
 		if err != nil {
-			log.Fatalf("Failed to drop database: %v", err)
+			log.Fatalf("Failed to drop database: %+v", err)
 		}
 	}
+}
+
+func connectionFactory() (connection.Connection, error) {
+	var conn connection.Connection
+	if protocol == "HTTP" {
+		connConfig := connection.HttpConfiguration{
+			Endpoint:    connection.NewEndpoints(endpoint),
+			ContentType: connection.ApplicationJSON,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				MaxConnsPerHost: nrConnections,
+				Proxy:           http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+					DualStack: true,
+				}).DialContext,
+				MaxIdleConns:        256,
+				MaxIdleConnsPerHost: 256,
+			},
+		}
+		conn = connection.NewHttpConnection(connConfig)
+	} else if protocol == "HTTP2" {
+		var connConfig connection.Http2Configuration
+		if usetls {
+			connConfig = connection.Http2Configuration{
+				Endpoint:    connection.NewEndpoints(endpoint),
+				ContentType: connection.ApplicationJSON,
+				Transport: &http2.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+		} else {
+			connConfig = connection.Http2Configuration{
+				Endpoint:    connection.NewEndpoints(endpoint),
+				ContentType: connection.ApplicationJSON,
+				Transport: &http2.Transport{
+					AllowHTTP: true,
+					DialTLS:   connection.NewHTTP2DialForEndpoint(connection.NewEndpoints(endpoint)),
+				},
+			}
+		}
+		conn = connection.NewHttp2Connection(connConfig)
+	} else {
+		log.Fatalf("-protocol needs to be HTTP or HTTP2")
+	}
+
+	if username != "" {
+		auth := connection.NewBasicAuth(username, password)
+		conn.SetAuthentication(auth)
+	}
+
+	return conn, nil
 }
