@@ -501,7 +501,7 @@ func main() {
 
 	var err error
 
-	conn, err := connection.NewPool(1, connectionFactory)
+	conn, err := connection.NewPool(nrConnections, connectionFactory)
 	if err != nil {
 		log.Fatalf("Failed to create connection: %+v", err)
 	}
